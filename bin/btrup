@@ -1,0 +1,13 @@
+#!/usr/bin/env python3
+import sys
+import os.path
+
+root = os.path.join(os.path.dirname(__file__), '..')
+
+if os.path.exists(os.path.join(root, 'pykutils', '__init__.py')):
+    sys.path.insert(0, root)
+
+import pykutils.btrup
+
+if __name__ == '__main__':
+    sys.exit(pykutils.btrup.main(sys.argv[1:], 'btrup'))

@@ -23,5 +23,6 @@ setup(name='pykutils',
       packages=['pykutils'],
       entry_points={
           'console_scripts': [
+              'btrup=pykutils.btrup:main',
           ]
       })
