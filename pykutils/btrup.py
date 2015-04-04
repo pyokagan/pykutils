@@ -92,6 +92,8 @@ class LocalHost(Host):
 
 
 class SSHHost(Host):
+    __p = None
+
     def __init__(self, host):
         Host.__init__(self)
         self.host = host
@@ -102,7 +104,8 @@ class SSHHost(Host):
                        'echo OK; cat >/dev/null']
         self.__p = subprocess.Popen(self.__args,
                                     stdout=subprocess.PIPE,
-                                    stdin=subprocess.PIPE)
+                                    stdin=subprocess.PIPE,
+                                    preexec_fn=os.setsid)
         # Wait for connection to be successful
         self.__p.stdout.read(3)
 
@@ -120,6 +123,11 @@ class SSHHost(Host):
             kwargs['stdin'] = subprocess.PIPE
         p = subprocess.Popen(cmd, *args, **kwargs)
         return p
+
+    def __del__(self):
+        if self.__p and self.__p.poll():
+            self.__p.terminate()
+            self.__p.wait()
 
     def __str__(self):
         return self.host
