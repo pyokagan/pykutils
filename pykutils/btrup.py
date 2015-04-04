@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 
 
 class Host(object):
@@ -27,6 +28,22 @@ class Host(object):
             raise subprocess.CalledProcessError(p.returncode, args)
         stdout = stdout.decode().strip()
         return stdout
+
+    def read_file(self, path):
+        """Read file and returns its contents"""
+        args = ['cat', path]
+        p = self._popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, _ = p.communicate()
+        if p.returncode != 0:
+            raise subprocess.CalledProcessError(p.returncode, args)
+        stdout = stdout.decode().strip()
+        return stdout
+
+    def kill(self, pid):
+        """Kills process ID. Ignores errors."""
+        args = ['kill', str(pid)]
+        p = self._popen(args, stderr=subprocess.PIPE)
+        _, _ = p.communicate()
 
     def list_subvolumes(self, path, snapshot=False, readonly=False):
         """Returns list of subvolumes in filesystem `path`"""
@@ -59,12 +76,15 @@ class Host(object):
 
     def send(self, subvol, parent=None):
         """Performs btrfs send"""
-        args = ['btrfs', 'send']
+        args = 'btrfs send'
         if parent:
-            args += ['-p', parent]
-        args.append(subvol)
-        p = self._popen(args, stdout=subprocess.PIPE)
-        return p
+            args += ' -p {0}'.format(subprocess.list2cmdline([parent]))
+        args += ' ' + subprocess.list2cmdline([subvol]) + ' &'
+        pidpath = os.path.join(os.sep, 'tmp', uuid.uuid1().hex)
+        args += ' echo $! > {0} ;'.format(subprocess.list2cmdline([pidpath]))
+        args += ' wait; rm {0};'.format(subprocess.list2cmdline([pidpath]))
+        p = self._popen(args, stdout=subprocess.PIPE, shell=True)
+        return p, pidpath
 
     def receive(self, path):
         """Performs btrfs receive into `path`"""
@@ -113,21 +133,27 @@ class SSHHost(Host):
         if self.__p.poll() is not None:
             raise subprocess.CalledProcessError(self.__p.returncode,
                                                 self.__args)
+        if not isinstance(cmd, str):
+            cmd = subprocess.list2cmdline(cmd)
         cmd = ['ssh', '-oControlMaster=no',
                '-oControlPath={0}'.format(self.__ctl_path),
-               self.host,
-               subprocess.list2cmdline(cmd)]
+               self.host, cmd]
         if 'stdout' not in kwargs:
             kwargs['stdout'] = self._devnull.fileno()
         if 'stdin' not in kwargs:
             kwargs['stdin'] = subprocess.PIPE
+        if 'shell' in kwargs:
+            del kwargs['shell']  # For SSH, shell is always True
         p = subprocess.Popen(cmd, *args, **kwargs)
         return p
 
     def __del__(self):
         if self.__p and self.__p.poll():
-            self.__p.terminate()
-            self.__p.wait()
+            try:
+                self.__p.terminate()
+                self.__p.wait()
+            except OSError:
+                pass
 
     def __str__(self):
         return self.host
@@ -239,7 +265,7 @@ def send_receive(volname, src, src_dir, parent, dst, dst_dir, blksize=0,
     else:
         progress = False
     tracker = StreamTracker(bwlimit, progress)
-    src_p = src.send(os.path.join(src_dir, volname), parent)
+    src_p, pidpath = src.send(os.path.join(src_dir, volname), parent)
     dst_p = dst.receive(dst_dir)
     try:
         copyfileobj(src_p.stdout, dst_p.stdin, blksize, tracker)
@@ -249,10 +275,26 @@ def send_receive(volname, src, src_dir, parent, dst, dst_dir, blksize=0,
         if dst_p.wait() != 0:
             raise subprocess.CalledProcessError(dst_p.returncode, [])
     except:
-        src_p.terminate()
-        src_p.wait()
-        dst_p.terminate()
-        dst_p.wait()
+        try:
+            src_p.terminate()
+            src_p.wait()
+        except OSError:
+            # Ignore OSError which can occur if src_p does not exist
+            pass
+        try:
+            dst_p.terminate()
+            dst_p.wait()
+        except OSError:
+            # Ignore OSError which can occur if dst_p does not exist
+            pass
+        # Send termination signal to btrfs send process if it still exists as
+        # src may not have noticed src_p has terminated.
+        try:
+            pid = int(src.read_file(pidpath))
+            src.kill(pid)
+        except subprocess.CalledProcessError:
+            pass
+        dst.sync(dst_dir)  # Force sync to prevent subvolume busy errors
         dst.delete_subvolume(os.path.join(dst_dir, volname))
         raise
 
@@ -300,7 +342,7 @@ def backup(src, src_path, dst, dst_path, fmt, parent_fmt, blksize=0, bwlimit=0,
         send_receive(src_snapname, src, src_voldir, src_parentpath, dst,
                      dst_path, blksize, bwlimit, progress)
     except:
-        # Cleanup
+        src.sync(src_voldir)  # Force sync to prevent subvolume busy errors
         src.delete_subvolume(src_snappath)
         raise
 
@@ -377,8 +419,8 @@ def main(args=None, prog=None):
     except Exception as e:
         print(prog, ': error: ', e, sep='', file=sys.stderr)
         return 1
-    except:
-        return 1
+    except KeyboardInterrupt:
+        return 0
     return 0
 
 
