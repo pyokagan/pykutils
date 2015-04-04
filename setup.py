@@ -24,5 +24,6 @@ setup(name='pykutils',
       entry_points={
           'console_scripts': [
               'btrup=pykutils.btrup:main',
+              'code2tex=pykutils.code2tex:main',
           ]
       })
