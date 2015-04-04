@@ -63,6 +63,8 @@ class Host(object):
         return paths
 
     def delete_subvolume(self, *paths):
+        if not paths:
+            raise ValueError('At least one path required')
         args = ['btrfs', 'subvolume', 'delete'] + list(paths)
         p = self._popen(args)
         if p.wait() != 0:
@@ -372,8 +374,10 @@ def clean(src, src_path, dst, dst_path, fmt, parent_fmt, keep=0):
         dst_rm_snapshots.extend(x[0] for x in shared_snapshots[keep:])
     src_rm_snapshots = [os.path.join(src_voldir, x) for x in src_rm_snapshots]
     dst_rm_snapshots = [os.path.join(dst_path, x) for x in dst_rm_snapshots]
-    src.delete_subvolume(*src_rm_snapshots)
-    dst.delete_subvolume(*dst_rm_snapshots)
+    if src_rm_snapshots:
+        src.delete_subvolume(*src_rm_snapshots)
+    if dst_rm_snapshots:
+        dst.delete_subvolume(*dst_rm_snapshots)
 
 
 def btrup(src, dst, fmt, parent_fmt=None, blksize=0, bwlimit=0,
