@@ -25,5 +25,6 @@ setup(name='pykutils',
           'console_scripts': [
               'btrup=pykutils.btrup:main',
               'code2tex=pykutils.code2tex:main',
+              'wgetmirror=pykutils.wgetmirror:main',
           ]
       })
