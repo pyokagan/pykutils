@@ -26,5 +26,6 @@ setup(name='pykutils',
               'btrup=pykutils.btrup:main',
               'code2tex=pykutils.code2tex:main',
               'wgetmirror=pykutils.wgetmirror:main',
+              'pykhome=pykutils.pykhome:main',
           ]
       })
